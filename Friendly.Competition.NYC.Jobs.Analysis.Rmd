@@ -128,7 +128,7 @@ Let's repeat the process on the other tail of the distribution: which agencies h
 sort(table(ConJobs[AvgSal >= 125486.5, "Agency"]))
 ```
 
-It seems that the Department of Health and Mental Hygiene provides a lion's share of the highest paying positions in the city. The Department of Environmental Protection is a close second although it has the highest salaried position at $198,518.
+It seems that the Department of Health and Mental Hygiene provides a lion's share of the highest paying positions in the city. The highest paying position, also part of that department, offers a $213,000 compensation.
 
 ```{r}
 max(ConJobs$AvgSal)

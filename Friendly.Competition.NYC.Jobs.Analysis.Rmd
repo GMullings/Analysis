@@ -1,0 +1,168 @@
+---
+title: "Friendly Competition NYC Jobs Analysis"
+author: "Geoffery Mullings"
+date: "February 26, 2016"
+output: word_document
+---
+<b>Executive Summary</b>
+
+The NYC Jobs data set was obtained from the NYC Open Data website. Out of all 45 agencies represented in the data set of open New York City government positions, the Department of Health and Mental Hygeine has the most openings: 1247. The Office of Administrative Trials and Hearings was overrepresented among the lowest paying positions, although the Office of Collective Bargaining houses the position offering the lowest compensation. On the other end the Department of Health and Mental Hygiene both dominated the highest paying positions and houses the top paying open job. When it comes to which jobs take the longest to fill the hypothesis is that the time it takes to fill a job is at least partially a function of the job's level, with higher level jobs requiring stronger qualifications taking longer to fill. The evidence found so far suggests that both the lowest level positions are actually proving harder to fill. 
+
+<b>Importing the raw data and setting up shop.</b>
+
+The NYC Jobs data set was obtained from the NYC Open Data website on Feburary 22nd, 2016. The latest data set can be found here: https://data.cityofnewyork.us/City-Government/NYC-Jobs/kpav-sd4t
+
+```{r}
+library("plyr")
+library("lattice")
+NYC_Jobs <- read.csv("~/Documents/rWD/NYC_Jobs.csv")
+```
+
+<i>Question 1: Which agency has the most openings?</i>
+
+```{r}
+count(NYC_Jobs, "Agency")
+```
+
+It's clear that, with 292 openings, the Department of Health and Mental Hygeine has the most job openings. But which agencies have the highest and lowest paying positions? We'll need to do some data munging to attain that answer.
+
+<b>Data Munging</b>
+
+First, let's assign the most useful columns for analysis of our raw data to a variable. We'll call it "ConJobs" to stand for Consolidated Jobs.
+
+After that, we'll address the issue of how salaries are recorded in the raw data. Rather than look at the minimum and maximum salary for each position we'll take an average of the two to use for our comparison. We'll call the variable holding that column of data "AvgSal" to stand for Average Salary, and add it to our ConJobs variable.
+
+```{r}
+ConJobs = NYC_Jobs[c("Level","Agency","Salary.Range.From","Salary.Range.To","Salary.Frequency","Posting.Date","Hours.Shift","Work.Location.1")]
+colnames(ConJobs)
+
+AvgSal = rowMeans(ConJobs[c("Salary.Range.From", "Salary.Range.To")], na.rm=TRUE)
+head(AvgSal)
+
+ConJobs["AvgSal"] = AvgSal
+```
+
+For due dilligence, let's make a new variable that reflects ConJobs sorted from lowest to highest average salary. We'll call it ConJobsOrd to stand for Consolidated Jobs Ordered.
+
+```{r}
+ConJobsOrd = arrange(ConJobs, AvgSal)
+```
+
+A bit more munging is now clearly necessary. Unfortunately analyzing the City's salary data is confounded by a mix of annual and hourly wages in the average salary column. We'll transform these observations into annual data.
+
+Using the Salary.Frequency column we'll adjust hourly wages by putting them into their own variable, multiplying them by 2080 (an estimate of how many hours per year an employee would work), and replacing the original observations with the transformed ones. A similar operation will be done on the daily wages, but they will be multiplied by 260 instead (an estimate of how many days per year an employee would work). We'll accept that both estimates can't accurately account for missed days of work due to sickness or vacation.
+
+```{r}
+levels(ConJobs$Salary.Frequency)
+```
+
+Salary jobs will have their own variable, ConJobsSal. For good measure hourly jobs will also have their own variable, ConJobsHR, as will daily jobs, ConJobsDay.
+
+```{r}
+ConJobsSal = subset(ConJobs, ConJobs$Salary.Frequency == "Annual")
+ConJobsHR = subset(ConJobs, ConJobs$Salary.Frequency == "Hourly")
+ConJobsDay = subset(ConJobs, ConJobs$Salary.Frequency == "Daily")
+
+#Transforming the data now.
+
+ConJobsHR$AvgSal = ConJobsHR$AvgSal*2080
+ConJobsDay$AvgSal = ConJobsDay$AvgSal*260
+
+#Putting it all back together now.
+
+ConJobs = rbind(ConJobsDay, ConJobsHR, ConJobsSal)
+```
+
+<b>Data Analysis</b>
+
+<i>Question 2: Which agencies have the highest and lowest paying positions?</i>
+
+Determining which agencies have the highest and lowest paying positions may be more complicated than just pulling the tail and head end of our ordered data. We should know about the distribution of pay among the open, salaried positions, and use descriptive statistical knowledge to identify which positions are truly the lowest and highest paying.
+
+```{r}
+summary(ConJobs$AvgSal)
+sd(ConJobs$AvgSal)
+```
+
+Based on the mean and standard deviation of the subset of data, we can gather that any position with a salary below $23773.52 is below 97.5% of the data, arguably lowest paying.
+
+```{r echo=FALSE}
+AvgSal = ConJobs$AvgSal
+
+densityplot(AvgSal, xlab="Average Salary", na.rm=TRUE, main="Distribution of Salary Amounts")
+```
+
+On the other hand we could have used an exogeneous determinant of "lowest paying" position", such as NYC's poverty line measure. That may be more externally applicable, but it may also avoid the spirit of relativity in the question.
+
+Let's build a table of all agencies in the lowest 2.5% of the average salary distribution.
+
+```{r}
+sort(table(ConJobs[AvgSal <= 23773.52, "Agency"]))
+```
+
+It's clear that the Office of Administrative Trials and Hearings and the Office of Collective Bargaining make up the most common agencies among the lowest paying jobs. Collective Bargaining is home to the lowest paid position.
+
+```{r}
+min(ConJobs$AvgSal)
+ConJobsOrd = (ConJobs[order(AvgSal), ])
+ConJobsOrd[1, ]
+```
+
+But which agencies offer the lowest average salary? Let's take the two most common agencies in the bottom and get their overall average salaries.
+
+```{r}
+ConJobsOATH = subset(ConJobs, Agency =="ADMIN TRIALS AND HEARINGS")
+mean(ConJobsOATH$AvgSal)
+
+ConJobsOCB = subset(ConJobs, Agency =="OFFICE OF COLLECTIVE BARGAININ")
+mean(ConJobsOCB$AvgSal)
+```
+
+Here it's made obvious that the Office Of Collective Bargaining is put at a disadvantage by having only two jobs to contribute to its average.
+
+On the other end, where can you find the highest paying jobs and how much do those agencies pay on average?
+
+Let's repeat the process on the other tail of the distribution: which agencies have the most open positions paying more than 97.5% of the other open positions?
+
+```{r}
+sort(table(ConJobs[AvgSal >= 125486.5, "Agency"]))
+```
+
+It seems that the Department of Health and Mental Hygiene provides a lion's share of the highest paying positions in the city. The Department of Environmental Protection is a close second although it has the highest salaried position at $198,518.
+
+```{r}
+max(ConJobs$AvgSal)
+ConJobsOrd[3963, ]
+```
+
+Healthcare is one of the fastest growing and most profitable industries in the country today. It is no wonder then that the DOHMH has an outstanding number of high-paying positions, largely beating out runner-up, unionized agencies like the Department of Sanitation and the Department of Correction. Retaining talent in the public sector obviously  requires providing competitive wages.
+
+<i>Question 3: Which jobs are the hardest to fill? Based on what?</i>
+
+Filling an open position can be a factor of many variables, including the firm's reputation or the office's distance from transportation. In the case of our data though the posting date is the most obvious indicator of which jobs are hardest to fill. Jobs that were posted farther in the past have probably been harder to fill.
+
+To explore that possibility we'll create another variable called ConJobsDate, which will contain our data frame ordered from earliest to latest date.
+
+```{r}
+ConJobsDate = arrange(ConJobs, as.Date(ConJobs$Posting.Date, format="%mm/%dd/%YYYY %h:%m:%s"))
+
+head(ConJobsDate)
+```
+
+Let's pull the first 166 entries as a sample and get a count. These entries include jobs posted on or before November 2015, or about 4 months ago. According to authorities on public sector employment, it can take as much as four months to fill a government job.
+
+The hypothesis is that the time it takes to fill a job is at least partially a function of the job's level, with higher level jobs that require more specialized talent taking longer to fill. Certainly other variables, like pay, could affect job fillings. But many of those variables may act in concordance with the job's level designation.
+
+```{r}
+count(ConJobsDate[1:166,"Level"])
+```
+
+Let's compare that result to the whole population of jobs.
+
+```{r}
+count(ConJobsDate["Level"])
+```
+
+It would seem that lower level jobs, those between level 00 and 02, take the longest time to fill.
+
+Further analysis should be conducted upon what variables influence the time it takes to fill a NYC Government position. It's possible that low salaries provide less of an incentive to take government jobs often located in lower Manhattan (and therefore further away from potential employees). It's also possible that there is a skills gap between those who would usually apply for these kinds of jobs and emerging job demands in the 21st century.

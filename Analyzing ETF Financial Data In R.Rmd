@@ -1,0 +1,116 @@
+---
+title: "Analyzing ETF Financial Data In R"
+author: "Geoffery Mullings"
+date: "March 16, 2016"
+output: word_document
+---
+Executive Summary:
+
+While research into portfolio theory suggests that stocks move very closely with each other in the market, there are circumstances where that relationship is broken or at least weaker. An analysis of two ETFs, one mimicking an index of small cap stocks and the other mimicking an index of large stocks, demonstrates a situation where this positive relationship between stocks can be broken. The below analysis shows a slightly negative relationship between the two ETFs, while also reinforcing popular theories of risk-reward tradeoffs among asset types. The negative relationship between the returns of the two ETFs has implications for optimal portfolio composition.
+
+Introduction:
+
+This analysis will look at price movements among two ETFs, specifically First Trust NASDAQ-100 EqualWeighted ETF (QQEW) and PowerShares S&P SmallCap Energy ETF (PSCE). The PowerShares ETF is meant to roughly mimic the movement of small cap energy stocks, while the First Trust ETF mimics an index of the hundred largest non-Financial companies listed on the NASDAQ. The contrast between large cap and small cap should be quite interesting to analyze.
+
+Data Loading and Munging:
+
+```{r}
+require(fImport)
+require(fBasics)
+
+qqew = yahooSeries("QQEW", from="1970-01-01", frequency="monthly")
+psce = yahooSeries("PSCE", from="1970-01-01", frequency="monthly")
+```
+
+Let's take a look at this data to get a sense of its descriptive statistics and if any munging is necessary.
+
+```{r}
+length(qqew)
+length(psce)
+```
+
+It seems that QQEW is longer, clearly that's because the fund began in April of 2006 as opposed to PSCE which started in 2008 (with our data set's observations beginning in 2010). Since all the data was imported on a monthly frequency resolving this bias in our analysis requires looking at only the last 72 rows of both sets.
+
+```{r}
+qqewadj = qqew[48:119,] #We're subsetting QQEW's last 72 rows before classifying the data as a time series, because plotting for QQEW later will be difficult otherwise.
+
+LogPqqew = log(qqew)
+LogPqqewAdj = LogPqqew[48:119,] #This variable will hold the last 72 observations of the Log prices of QQEW, making it easier to reference for the rest of our analysis.
+
+qqewadj = ts(qqewadj, start=c(2010,4), frequency=12)
+psceTs = ts(psce, start=c(2010,4), frequency=12) #We're making the time series classification of this data its own variable because transforming the original variable to a time series doesn't allow us to manipulate it as a data frame later on in the analysis.
+LogPqqewAdj = ts(LogPqqewAdj, start=c(2010,4), frequency=12)
+
+LogPpsce = log(psceTs) #Log returns are easier to compare over time, and accurate as long as returns aren't too large.
+```
+
+Let's both compare plots of the two ETFs' adjusted closing prices and plots of the adjusted prices versus the log of those prices for each ETF.
+
+Analysis:
+
+```{r}
+par(mfrow=c(2,2))
+plot(qqewadj[,6], ylab="Adj. Closing Price", main="QQEW's Adj. Closing Price")
+plot(psceTs[,6], ylab="Adj. Closing Price", main="PSCE's Adj. Closing Price")
+plot(LogPqqewAdj[,6], ylab="Log of Adj. Closing Price", main="Log of QQEW's Adj. Closing Price")
+plot(LogPpsce[,6], ylab="Log of Adj. Closing Price", main="Log of PSCE's Adj. Closing Price")
+```
+
+The different versions of each ETF's plot seem very similar, although visually there are noticable differences. Both ETFs look like they have moments when their prices travel in different directions, but in general they seem to move together. This would support common theories on asset price movements in the stock market, but signals to some potential inconsistencies.
+
+Some basic descriptive statistics about the log returns of both ETFs could be insightful.
+
+```{r}
+LogRqqew = 100 * diff(log(qqew))
+LogRpsce = 100 * diff(log(psce))
+LogRqqewAdj = LogRqqew[48:119,] #To eliminate bias we again only use the last 72 rows.
+basicStats(LogRqqewAdj$QQEW.Adj.Close)
+basicStats(LogRpsce$PSCE.Adj.Close)
+```
+
+As expected we see evidence of a trade-off between average return size and variation. This demonstrates the risk-reward concept of asset pricing: the riskier (higher variance) an asset, the higher its return should theoretically be. It's not too surprising that PSCE, meant to mimic the small cap index, shows signs of higher risk than QQEW - it also has a higher mean return. The right skew in QQEW's returns only speaks further to the risk-reward trade off.
+
+```{r}
+LogRqqewAdjTs = ts(LogRqqewAdj, start=c(2010,4), frequency=12) #Make a separate variable just for the time series classification because "LogRqqewAdj" may be needed as a data frame later.
+
+par(mfrow=c(1,2))
+plot(LogRpsce[,6], ylab="Log of Adj. Closing Price Returns", main="Log of PSCE's Adj. Closing Price Returns")
+plot(LogRqqewAdjTs[,6], ylab="Log of Adj. Closing Price Returns", main="Log of QQEW's Adj. Closing Price Returns")
+```
+
+The plots of log returns again emphasize the risk-reward differences between small cap and large stocks.
+
+```{r}
+par(mfrow=c(2,1))
+histPlot(LogRpsce[,6], col="steelblue", fit=TRUE, main="Log Returns of PSCE")
+histPlot(LogRqqewAdj[,6], col="steelblue", main="Log Returns of QQEW")
+```
+
+As the histogram shows, QQEW is certainly right skewed, again reinforcing the risk-reward differences between small cap and large stocks.
+
+A closer look at the behavior of the returns in relation to each other could be revealing.
+
+```{r}
+fit = lm(LogRpsce$PSCE.Adj.Close ~ LogRqqewAdj$QQEW.Adj.Close)
+plot(LogRpsce$PSCE.Adj.Close ~ LogRqqewAdj$QQEW.Adj.Close, xy.lines=FALSE, main="PSCE Log Returns vs. QQEW's", xlab="QQEW's Log Returns", ylab="PSCE's Log Returns")
+abline(a=fit)
+```
+
+Visually, there's some sort of relationship between the two assets, and the tilt of the fitted line suggests it is a negative one. But even visually the fit seems inadequate and may result in many large, predictable residuals. A look at the covariance and correlation could give some stronger insights.
+
+```{r}
+Ret = cbind(LogRpsce$PSCE.Adj.Close, LogRqqewAdj$QQEW.Adj.Close)
+cov(Ret, use="complete.obs")
+```
+
+The covariance results suggests there's a negative linear relationship between the two ETF's returns. But even the covariance paints a limited picture, so a normalization of the covariance with a correlation test may help.
+
+```{r}
+cor(Ret, use="complete.obs")
+```
+
+The correlation coefficient confirms that there is a very weak negative relationship between the two ETFs. Had the correlation coefficient been larger it would be worth it to investigate how well this linear model fits the data. But it's obvious that this relationship is extremely weak.
+
+Conclusion:
+
+A weak, negative relationship between these two ETFs not only makes sense but is also desirable. While stocks tend to move together in the market over time portfolio theory calls for a mix of asset holdings with nullifying covariances. To that end some assets with negative relationships is desirable. This analysis demonstrates how small and large cap stocks could offer another layer of diversification within asset classes.

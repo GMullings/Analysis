@@ -1,0 +1,99 @@
+---
+title: "Estimating Beta For A Portfolio Of Stocks"
+author: "Geoffery Mullings"
+date: "March 29, 2016"
+output: word_document
+---
+Executive Summary:
+
+For some a stock's beta can be used as a proxy for the asset's systemic risk - that is, how vulnerable the stock is to movements in the market. This analysis estimates beta coefficients for a portfolio of stocks while interpreting and comparing those values to more standard measures of risk such as variance and correlation. While to a certain extent beta represents systemic risk its ability to proxy for risk is quite limited. The difference between upside and downside risk is difficult to attain from beta, while covariance offers much more flexibility in portfolio risk managment.
+
+Introduction:
+
+A stock's beta can be a convenient proxy for risk depending on many factors. Beta is a measure of comovement with the market, often interpreted as a measure of systemic risk. If a stock moves more than the market it will have a higher beta, while the reverse is true for a lower beta. The risk-reward tradeoff framework suggests that stocks with lower betas may be safer but should provide less opportunity for large gains. That will be tested in the analysis below.
+
+Beta can be estimated theoretically through a regression model, perhaps even a linear regression depending on the movement of the stock. It's also possible to observe historical data and assess whether beta accurately reflects our normal understanding of "risk."
+
+Data Loading and Munging:
+```{r}
+require(tseries)
+require(zoo)
+require(fBasics)
+
+# Retrieving the Market Factor. Using the S&P 500 as a proxy for the market's movements.
+sp <- get.hist.quote("^GSPC", start='1989-12-01', quote="AdjClose", compression="m", quiet=TRUE)
+
+mytick = c('ATI','TSN','GME','LB','PAYX') # Storing all of the stocks in a variable for looping.
+
+data <- get.hist.quote(mytick[1], quote="AdjClose", start="1989-12-01", compression="m", quiet=TRUE, retclass="zoo")
+
+for (i in 2:length(mytick))
+  
+{
+  
+  temp = get.hist.quote(mytick[i], quote="AdjClose", start="1989-12-01", compression="m", quiet=TRUE, retclass="zoo")
+                         
+                         data = cbind(data, temp)
+                         
+}
+
+colnames(data) = mytick
+
+# Transforming into logarithmic returns. Log returns are easier to compare over time, and accurate as long as returns aren't too large.
+ret = 100 * diff(log(data))
+sp = 100 * diff(log(sp))
+colnames(sp) = "SP.500"
+StocksMarketRet = cbind(ret,sp)
+
+sum(is.na(StocksMarketRet)) # Any missing return values?
+```
+
+There are some NA values in the historical data because each stock had its IPO after 1990. To reduce bias in our analysis we'll eliminate all observations preceding the IPO of the youngest stock in the portfolio, GME.
+
+```{r}
+StocksMarketRetAdj = StocksMarketRet[151:318,] # Eliminating the first 149 observations from all assets to reduce bias.
+
+sum(is.na(StocksMarketRetAdj))
+```
+
+Let's first analyze some of the basic statistics about this portfolio's and the S&P 500's logarithmic return.
+
+Analysis:
+
+```{r}
+basicStats(StocksMarketRetAdj)
+```
+
+There's some upside risk in ATI (a small cap metals and mining firm) based on the mean, median, and high variation, if not the maximum observation. This could be due to its relative youth on the market, similar to GME (the infamous small cap video game retailer, GameStop), which also exhibits a high variance and many low returns, evidenced by a large negative skew and minimum value. High variance is also not particularly uncommon for technology stocks.
+
+All but ATI and PAYX (a large cap IT firm) seem negatively skewed based on mean and median values, with the largest tails present on GME (which also happens to be the second-highest stock in variance) based on its kurtosis value. 
+
+LB (a large cap retailer of women's underwear) and TSN (the large cap food producer Tyson Foods) share with the other stocks high variances relative to the market, accompanied by higher mean returns - except for ATI.
+
+Every stock in the portfolio has a higher return variance than the market. Alongside variance, comovement between assets and the market should be assessed on the road to estimating beta.
+
+```{r}
+plot(as.zoo(StocksMarketRetAdj), main="Portfolio Stock Market Returns")
+plot(as.data.frame(StocksMarketRetAdj), main="Portfolio Stock Market Returns Plotted Against Each Other")
+```
+
+Visually, there's evidence of comovement between all the stocks and the market factor. Obviously some stock return data exhibits more varied comovement than others, and finding these differences between the asset and the market factor's comovement will give us the sought-after estimate of beta.
+
+```{r}
+cor(StocksMarketRetAdj) # Would have included use="pairwise.complete" if I hadn't eliminated the missing observations already.
+
+fit = lm(StocksMarketRetAdj[,mytick] ~ StocksMarketRetAdj$SP.500)
+coef(summary(fit))
+```
+
+The p and t-values of all the coefficients suggests that each is statistically significant and most likely a reliable estimate of their respective betas.
+
+Notably even though TSN and GME have some of the weakest correlations with the market factor, they have betas that are very close to 1. While correlation shows the strength of return similarities between the stock and the market, beta really estimates the effect of a market movement on each asset.
+
+Conclusion:
+
+The preceding has hopefully made it clear that beta provides some utility accompanied by many limits. Beta is much better at capturing all around variance within a stock's returns, relative to the market, than specifically downside risk. Take for example that ATI had the highest upside risk as measured by its maximum observation and other variables, but has a far higher estimated beta than GME - the stock with the highest downside risk in our portfolio based on the same measures.
+
+Similarly, beta does not communicate well correlation or covariances, measures with the potential to control portfolio risk much more effectively.
+
+It's a relatively easy to estimate the measure, but beta hardly scratches the surface in relaibility when it comes to assessing portfolio risk.

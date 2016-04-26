@@ -1,0 +1,230 @@
+---
+title: "Forecasting Revenue With Stationary Time Series Models"
+author: "Geoffery Mullings"
+date: "April 26, 2016"
+output: word_document
+---
+Executive Summary
+
+A trend stationary model is used to forecast Starbucks' (SBUX) revenue from a snapshot of historical data. The report provides a prediction of 2015 Q4 revenue to demonstrate the forecast's validity in addition to predictions for up to five quarters further ahead. The forecast for 2015 Q4 undershot SBUX's actual realized revenue by over $400 million or .33 Standard Deviation. Still, the model correctly predicted that revenue would climb in the short-run.
+
+Introduction
+
+Effective forecasts capture patterns in observations along multiple dimensions. Comprehensive forecasts include trend direction, stationarity, seasonality, and auto-regression of observations. Additionally a forecast will most likely hold more validity if it captures as much information as possible from the relevant history of data. The model providing the forecasts of Starbucks' (SBUX) revenue considers all of those dimensions.
+
+Methodology
+
+Data ETL:
+```{r}
+library(zoo)
+library(dyn)
+library(urca)
+
+temp = tempfile()
+download.file("http://faculty.baruch.cuny.edu/smanzan/eco9723/files/EPS_REV_FALL2015.csv",temp)
+data = read.csv(temp)
+unlink(temp)
+
+mytick = "SBUX" # Starbucks
+index = which(data[,"tic"] == mytick)
+mydata = data[index,]
+```
+
+Data Munging and Further Transformation and Loading:
+```{r}
+sum(is.na(mydata)) # Two missing values in the data.
+head(mydata) # Both missing values are in the first row of observations.
+NoNamydata = mydata[-1,] # Removing NA values from the data.
+
+startdate = NoNamydata[2, "datacqtr"]
+rev = zooreg(NoNamydata[, "revtq"], start=as.yearqtr(startdate), frequency=4) # Rev is the quarterly revenue value for Starbucks.
+
+# Creating the Trend and Dummy Variables
+trend = zooreg(1:length(rev), start=as.yearqtr(startdate), frequency=4)
+trendsq = trend^2
+trendcub = trend^3
+Q1 = zooreg(as.numeric(cycle(rev) ==1), start=start(rev), frequency=4)
+Q2 = zooreg(as.numeric(cycle(rev) ==2), start=start(rev), frequency=4)
+Q3 = zooreg(as.numeric(cycle(rev) ==3), start=start(rev), frequency=4)
+Q4 = zooreg(as.numeric(cycle(rev) ==4), start=start(rev), frequency=4)
+
+# Determining whether to use the log of SBUX's revenue. 
+par(mfrow=c(2,2))
+plot(rev,xlab="", main="SBUX's Revenue Values \nOver Time")
+plot(log(rev), xlab="", main="SBUX's Logarithmic \nRevenue Over Time")
+plot(diff(rev), xlab="", main="Changes in SBUX's \nRevenue Over Time")
+plot(diff(log(rev)), xlab="", main="Changes in SBUX's Logarithmic \nRevenue Over Time")
+```
+
+Logarithmic values are easier to linerarize and are generally accurate absent large changes in values. This data from Starbucks seems to be an ideal candidate for logarithmic transformation.
+
+Data Analysis:
+```{r}
+lrev = log(rev)
+dlrev = diff(lrev)
+
+# Estimating the statistical significance of the lags and trend variables to 
+# predicting logarithmic revenue values. 
+adffit = dyn$lm(dlrev ~ lag(rev, -1) + lag(dlrev, -1:-4) + trend + Q2 + Q3 + Q4)
+summary(adffit)
+
+# Using an Augmented Dickey-Fuller (ADF) Test to test the null hypothesis that 
+# the logarithmic revenue values are non-stationary with a trend.
+# Fourth lag seems statistically significant to predicting revenue, so the ADF 
+# test will be run with that many lags.
+```
+
+An Augmented Dickey-Fuller Test will assess the null hypothesis that the logarithmic revenue values follow a non-stationary trend. Non-Stationary trends require a unique set of statistical testing to accurately determine the significance of predictors. 
+
+```{r}
+adf = ur.df(lrev, type="trend", lags=4)
+summary(adf)
+```
+
+The test statistic -7.38 is far greater than the critical value -3.45 for our ADF test at 5%. This evidence rejects the null hypothesis that the logarithmic revenue values are consistent with a non-stationary trend.
+
+```{r}
+# Testing the potential trend models to determine which is statistically the # most appropriate to include in this model.
+
+fitlin  = dyn$lm(lrev ~ trend)
+fitquad = dyn$lm(lrev ~ trend + trendsq)
+fitcub = dyn$lm(lrev ~ trend + trendsq + trendcub)
+
+par(mfrow=c(1,1))
+plot(lrev, xlab="", col="gray50", main="Trend Lines Over SBUX's Logarithmic Revenue \nOver Time")
+lines(fitted(fitlin),col=2,lwd=2,lty=2)
+lines(fitted(fitquad),col=4,lwd=2,lty=2)
+lines(fitted(fitcub),col=6,lwd=2,lty=2)
+
+# The cubic trend seems to provide the best fit visually. Since the model is # stationary, we can safely assess the signifcance of the fit using t-test 
+# statistics and p values.
+
+round(summary(fitlin)$coefficients, 4)
+round(summary(fitquad)$coefficients, 4)
+round(summary(fitcub)$coefficients, 4)
+```
+
+All three models seem statistically significant - the standard trend shows the most statistical promise although the quadratic one seems more so appropriate visually. An Akaike Information Criterion (AIC) Test will help determine how much data is systematically left out of each model. The lowest scoring model would be the best fit.
+
+```{r}
+# Running an AIC test to determine which model fits the historical data the 
+# best.
+
+AIC(fitlin)
+AIC(fitquad)
+AIC(fitcub)
+
+# The cubic model seems best at capturing data points. Checking the autocorrelation of residuals for the cubed trend.
+
+acf(residuals(fitcub), lag=12, xlab="", main="Auto-Correlation of Residuals On A Cubic Trend")
+
+# Few Residuals are significantly correlated and they become a lot less so as 
+# time goes on.
+```
+
+The cubic trend is statistically the most appropriate one to use in our model, displaying the lowest AIC value and few correlated residuals. 
+
+```{r}
+
+# Testing if the logarithmic revenue values are seasonal.
+
+fitcubs = dyn$lm(lrev ~ trendcub + Q2 + Q3 + Q4)
+summary(fitcubs)
+
+# None of the seasonal dummies are statistically significant. Plotting out the residuals and a reference diagram.
+
+par(mfrow=c(1,3))
+plot(lrev, xlab="", main="SBUX's Logarithmic Revenue \nOver Time")
+plot(residuals(fitcubs), xlab="", main="Residuals On A \nSeasonal Cubic Trend")
+acf(residuals(fitcubs), lag=12, xlab="", main="Auto-Correlation of \nResiduals On A Seasonal \nCubic Trend")
+
+# Residuals are highly and persistently auto-correlated when seasonal dummies are included. The data is not seasonal.
+
+# An auto-regressive component will be built into the model. The AR factor ideally will # capture many of the residuals left over by the selected trend.
+
+resid = residuals(fitcub)
+fitresid = ar(resid, aic=TRUE, order.max=8, demean=FALSE, method="ols")
+ord = 1:fitresid$order # Finding the optimal order to capture auto-regression.
+fitcubar = dyn$lm(lrev ~ lag(lrev, -ord) + trendcub)
+summary(fitcubar)
+
+# As should be expected the lags are much more statistically significant than the cubic trend.
+
+AIC(fitcubar)
+par(mfrow=c(1,2))
+plot(residuals(fitcubar), xlab="", main="Residuals On An \nAuto-Regressed Cubic \nTrend")
+acf(residuals(fitcubar), lag=12, xlab="", main="Auto-Correlation of \nResiduals On An \nAuto-Regressed Cubic \nTrend")
+
+# The AIC value has almost tripled, and the residuals for this model are more tightly 
+# around 0 and far less predictable as evidenced by their low auto-correlations.
+```
+
+The analysis demonstrates that our model paramaters are statistically suitable for forecasting SBUX's revenue. The model significantly explains over 99% of the observations seen in the historical data.
+
+Forecast
+
+```{r echo=FALSE}
+# Forecast function is a dynamic modification of one provided by CUNY Professor Sebastiano Manzan.
+myforecast <- function(y,  ord=1, n.ahead=5, trend=1, seasonal="yes", obs=4)
+{
+  # y        = time series to be forecast
+  # ord      = lags to be included
+  # n.ahead  = number of forecasts
+  # trend    = exponential change of the trend
+  # seasonal = "yes" or "no"
+  # obs = number of observations per unit of time.
+  
+  require(dyn)
+  
+  ypred   <- window(as.ts(y), end=(end(y) + n.ahead/obs), extend=TRUE) # Window is a 
+  # subsetting function, Ypred subsets the time series up to n.ahead/obs observations. 
+  # Extend needs to be true to do this.
+  ypred   <- zooreg(c(ypred), start=start(y), frequency=obs) # c(ypred) used to turn 
+  # ypred into a vector for zooreg
+  
+  if (!is.null(trend) && trend > 1){
+    for (e in 2:trend){
+      X.pred = cbind((zooreg(1:length(ypred), start=start(y), frequency=obs))^e)
+    }}
+  
+  if (!is.null(trend) && trend == 1){
+    t   <- zooreg(1:length(ypred), start=start(y), frequency=obs)
+    X.pred = cbind(t) } # Predicting the time component of the trend to the distance of 
+  # ypred, as done during the analysis. 
+  
+  unit <- cycle(ypred) # Making unit a variable of the cycles of ypred. Should have a 
+  # way to specify the number of cycles in the function.
+  if (seasonal == "yes"){
+    if (!is.null(obs) && obs > 1) {
+      for (u in 2:obs) { # Loops through the obs count and creates seasonal dummy 
+              # variables for each unit as a new column in X.pred.
+        X.pred  = cbind(X.pred, zooreg(as.numeric(quarter ==u), start=start(y), frequency=obs))
+      }}
+  }
+  if (!exists("X.pred")){ # If there is no trend, function assumes lags will predict 
+          # future observations.
+    fit <- dyn$lm(ypred ~ lag(ypred, -ord)) 
+    for (i in 1:n.ahead) ypred[length(y)+i] <- window(predict(fit, ypred), start=end(y)+i/obs, end=end(y)+i/obs)
+  }
+  if (exists("X.pred")){
+    fit <- dyn$lm(ypred ~ lag(ypred, -ord) + X.pred)
+    for (i in 1:n.ahead) ypred[length(y)+i] <- window(predict(fit, cbind(ypred,X.pred)), start=end(y)+i/obs, end=end(y)+i/obs)
+  }  
+  forecasts <- window(ypred, start=(end(y)+(1/obs)))  
+  return(forecasts)
+}
+```
+
+```{r}
+myf = myforecast(lrev, ord=ord, n.ahead = 6, trend = 3, seasonal="No")
+myf
+
+myf = myforecast(rev, ord=ord, n.ahead = 6, trend = 3, seasonal="No")
+round(myf, 2)
+```
+
+The forecast for 2015 Q4 undershot the actual realized revenue by over $400 million or .33 Standard Deviations. The model predicts revenue will interchangably climb and drop each quarter before taking a sharp upward turn in 2017 Q1. Each predicted change in revenue is notably within one standard deviation of the prior value.
+
+Conclusion
+
+Although not perfect, the trend stationary model designed in this report does seem to be a reliable measure of where SBUX's revenue will trend in the short term. While the model's level of precision may be questionable, it's obviously a useful tool for quantitatively informing decisions surrounding the firm's revenue outlook.

@@ -1,0 +1,129 @@
+---
+title: "Modeling The Volatility of a Stock Return"
+author: "Geoffery Mullings"
+date: "May 31, 2016"
+output: html_document
+---
+
+Executive Summary
+
+It is demonstrated that Amphenol Corporation's (APH's) daily returns significantly average out to 0%, giving way substantially to the value of modeling the daily volatility of the company's stock returns. Because of the frequency of the observations and the significant autocorrelation of returns with their prior day's observation, a GARCH model seems most appropriate. This analysis determines that the GJR-GARCH model provides the best fit for  forecasting APH's daily returns volatility.
+
+Introduction
+
+Volatility forecasting is useful for portfolio design. Information regarding the magnitude of volatility caused by positive or negative news can dictate asset selection with the aim of diversifying or hedging.
+
+Hypothesis and Analysis Expectations
+
+This analysis will model APH's daily returns and provide a forecast of volatility for the upcoming thirty days. It is believed that an examination of the data will demonstrate that APH's daily returns are effectively 0% and autoregressive, in line with financial theory and prior research. Therefore a generalized autoregressive conditional heteroskedasticity (GARCH) model will be fitted to APH's daily volatility. 
+
+Additionally, since the Glosten-Jagganathan-Runkle GARCH (GJR GARCH) model includes a formula for fitting a process that is responsive to positive and negative innovations it is expected to be a better fit than the regular GARCH model.
+
+Finally, the correct model will be used to forecast the volatility of daily returns for APH.
+
+Methodology
+
+Data ETL:
+```{r echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+require(fImport)
+require(fBasics)
+require(TTR)
+require(timeSeries)
+require(rugarch)
+```
+```{r}
+aph = yahooSeries("APH", from="1990-01-01", to="2016-05-18", frequency="daily")
+
+```
+
+Data Munging and Transformation:
+```{r}
+aphadjclse = aph[,6]
+aphRet = diff(aphadjclse)/aphadjclse
+colnames(aphRet) = "APH.Adj.Ret"
+
+aphRetSq = aphRet[-1,]^2
+Aphma25Plot = SMA(aphRetSq, n=25)
+Aphma100Plot = SMA(aphRetSq, n=100)
+AphSigma25 = rollMean(aphRetSq, 25, align="right")
+Aphema94Plot = EMA(aphRetSq, ratio=.06)
+Aphema94Plot = sort(Aphema94Plot, decreasing = TRUE) # Changing the order of the values to match up with the return values later.
+
+Filtered.Aphema94Plot = na.omit(Aphema94Plot) # Removing NAs so the volatility estimate can be used in denominator of the standardized returns formula.
+Win.aphRet = window(aphRet, start="1991-12-24", end="2016-05-17")
+Win.Aphema94Plot = window(Filtered.Aphema94Plot, start="1991-12-24", end="2016-05-17")
+St.aphRet = Win.aphRet/Win.Aphema94Plot # Standardized APH returns.
+
+spec = ugarchspec(variance.model=list(model="sGARCH", garchOrder=c(1,1)), mean.model=list(armaOrder=c(1,0)))
+Aphfitgarch = ugarchfit(spec=spec, data=aphRet[-1,])
+
+SigmaAphgarch = sigma(Aphfitgarch)
+
+gjrspec = ugarchspec(variance.model=list(model="gjrGARCH", garchOrder=c(1,1)), mean.model=list(armaOrder=c(1,0)))
+Aphfitgjrgarch = ugarchfit(spec=gjrspec, data=aphRet[-1,])
+
+FitInfo = cbind(infocriteria(Aphfitgarch), infocriteria(Aphfitgjrgarch))
+colnames(FitInfo) = c("GARCH", "GJR")
+
+newsgarch = newsimpact(Aphfitgarch)
+newsgjrgarch = newsimpact(Aphfitgjrgarch)
+```
+
+
+Data Analysis:
+```{r}
+basicStats(aphRet)
+
+t.test(aphRet, na.action="Exclude")
+
+acf(aphRet[-1,])
+```
+
+The t-test confirms the statistically significant likelihood that APH's average daily return is equivalent to 0%. 
+
+Additionally, there is significant evidence of autocorrelation between the prior day's return and the current day's return. That supports the use of an autoregressive-moving average model as appropriate.
+
+Both results leave room for the possibility that even a generalized autoregressive conditional heteroskedasticity (GARCH) model may be the most appropriate ARMA option. 
+
+```{r}
+# Aphfitgarch is the GARCH model's fit to the daily returns of APH.
+round(coef(Aphfitgarch), 3)
+```
+
+The low omega value in the function suggests that the conditional variance is very persistent and takes longer to revert back to its mean. The omega coefficient remains low even when considering only observations made during the Great Recession reocvery.
+
+As an alternative, the GJR GARCH model may provide a better fit for modelling APH's daily volatility.
+
+```{r}
+FitInfo
+```
+
+Based on the coefficients of multiple information criterion measures, GJR provides the best model fit.
+
+```{r}
+signbias(Aphfitgjrgarch)
+
+round(coef(Aphfitgjrgarch), 3)
+```
+
+The lack of a significant coefficient in the sign bias test suggests that volatility is likely affected by both positive and negative shocks.
+
+The negative gamma coefficient picked up by the GJR model indicates that negative shocks generate less volatility than positive shocks. Yet that the coefficient is so close to zero should be considered in evaluating how much the direction of the shock matters.
+
+The final piece of the analysis is a plot of the news curve, demonstrating the larger influence of positive news shocks on the volatility of returns.
+
+```{r}
+plot(newsgjrgarch$zx, newsgjrgarch$zy, xlab=newsgjrgarch$xper, ylab=newsgjrgarch$yexpr, lwd=2)
+```
+
+Forecast
+
+```{r echo=FALSE}
+plot(ugarchforecast(Aphfitgjrgarch, n.ahead=30)) # Unconditional
+```
+
+The forecast seems to show volatility increasing in the foreseeable near term, from about 0.0125 to around 0.0155% in the 30 days following the last observation.
+
+Conclusion
+
+GJR, because of its sensitivity to positive and negative shocks, is demonstrably the better modeling option for APH's daily volatility. Because daily returns average out to 0% it is volatility that really offers opportunities to capitalize from daily fluctuations in price. While daily price changes are beyond the reach of this model the ability to forecast volatility ranges is powerful evidence for determining asset allocations.
